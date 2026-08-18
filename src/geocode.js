@@ -3,6 +3,30 @@ import path from 'node:path';
 import { config, dataDir } from './config.js';
 
 const cachePath = path.join(dataDir, 'geocode-cache.json');
+
+/**
+ * Outlook locations are often "Venue Name (street address)" or "Venue - address".
+ * Produce lookup candidates from most to least specific; the parenthesized
+ * street address geocodes far more reliably than the combined string.
+ */
+export function candidates(location) {
+  const out = [location.trim()];
+  const paren = location.match(/\(([^)]+)\)\s*$/);
+  if (paren) {
+    out.push(paren[1].trim());
+    out.push(location.replace(/\([^)]*\)\s*$/, '').trim());
+  }
+  return [...new Set(out)].filter(Boolean);
+}
+
+/** Try each candidate form of the location until one geocodes. */
+export async function geocodeLocation(location) {
+  for (const candidate of candidates(location)) {
+    const result = await geocode(candidate);
+    if (result) return result;
+  }
+  return null;
+}
 const cache = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, 'utf8')) : {};
 
 let lastRequest = 0;

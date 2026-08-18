@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { config } from './config.js';
 import { fetchDrives } from './teslamate.js';
 import { fetchMeetings, getToken } from './graph.js';
-import { geocode } from './geocode.js';
+import { geocodeLocation } from './geocode.js';
 import { matchTrips } from './matcher.js';
 import { toCsv, summarize } from './report.js';
 
@@ -40,7 +40,7 @@ async function cmdMatch(args) {
 
   console.error('Geocoding meeting locations ...');
   for (const m of meetings) {
-    const coords = await geocode(m.location);
+    const coords = await geocodeLocation(m.location);
     m.lat = coords?.lat ?? null;
     m.lon = coords?.lon ?? null;
     if (!coords) console.error(`  could not geocode: "${m.location}" (${m.subject})`);

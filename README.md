@@ -17,7 +17,9 @@ Tesla's Fleet API has no trip-history endpoint; every trip logger works by recor
 
 - Node.js 20+
 - A running TeslaMate instance and read access to its Postgres database
-- An Azure app registration for Microsoft Graph (free):
+- Microsoft Graph access to your calendar, either of:
+  - **Client credentials** (non-interactive, good for tenant admins): an app registration with the `Calendars.Read` application permission; set `GRAPH_CLIENT_SECRET` and `GRAPH_USER_UPN` (or `GRAPH_ENV_FILE`) in `.env`.
+  - **Device code** (default for individuals): an Azure app registration for Microsoft Graph (free):
   1. [Azure Portal](https://portal.azure.com) > App registrations > New registration
   2. Supported account types: pick what matches your mailbox (work/school tenant or personal Microsoft accounts)
   3. Authentication > Advanced settings > **Allow public client flows: Yes**
