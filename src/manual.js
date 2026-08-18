@@ -39,6 +39,38 @@ export function parseCsv(text) {
  * dates as YYYY-MM-DD. Re-importing the same source replaces its rows,
  * so the operation is idempotent per source label.
  */
+/**
+ * Add a single manual business trip. Miles can be given explicitly, or copied
+ * from a logged TeslaMate drive (--drive <id>), which keeps the distance
+ * GPS-verified while the human supplies the business purpose.
+ */
+export async function addManualTrip({ date, miles, driveId, leg, reason }) {
+  requireConfig(['teslamateDbUrl']);
+  const client = new pg.Client({ connectionString: config.teslamateDbUrl });
+  await client.connect();
+  try {
+    if (driveId != null) {
+      const d = await client.query(
+        'SELECT start_date, distance FROM drives WHERE id = $1',
+        [driveId]
+      );
+      if (!d.rows.length) throw new Error(`No TeslaMate drive with id ${driveId}`);
+      miles = d.rows[0].distance * 0.621371;
+      date = date || d.rows[0].start_date.toISOString().slice(0, 10);
+    }
+    if (!date || !Number.isFinite(Number(miles))) {
+      throw new Error('Need --date and --miles, or --drive <id>');
+    }
+    await client.query(
+      'INSERT INTO mileage.manual_trips (trip_date, leg, miles, reason, source) VALUES ($1, $2, $3, $4, $5)',
+      [date, leg || null, Number(Number(miles).toFixed(1)), reason || null, driveId != null ? `drive-${driveId}` : 'adhoc']
+    );
+    return { date, miles: Number(Number(miles).toFixed(1)) };
+  } finally {
+    await client.end();
+  }
+}
+
 export async function importManualTrips(file, source) {
   requireConfig(['teslamateDbUrl']);
   const rows = parseCsv(readFileSync(file, 'utf8'));

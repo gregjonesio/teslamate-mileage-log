@@ -6,7 +6,7 @@ import { fetchMeetings, getToken } from './graph.js';
 import { geocodeLocation } from './geocode.js';
 import { matchTrips } from './matcher.js';
 import { toCsv, summarize } from './report.js';
-import { importManualTrips } from './manual.js';
+import { importManualTrips, addManualTrip } from './manual.js';
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -27,7 +27,13 @@ function usage() {
                                         Match drives to meetings and print/write the log
   mileage import --csv trips.csv [--source label]
                                         Import historical trips (columns: date,leg,miles,reason)
-                                        into mileage.manual_trips; idempotent per source`);
+                                        into mileage.manual_trips; idempotent per source
+  mileage add --drive <id> --reason "..." [--leg "..."]
+  mileage add --date YYYY-MM-DD --miles N --reason "..." [--leg "..."]
+                                        Log one manual business trip; --drive copies the
+                                        GPS-verified distance from a TeslaMate drive
+  mileage drives --from YYYY-MM-DD --to YYYY-MM-DD
+                                        List logged TeslaMate drives (to find drive ids)`);
 }
 
 async function cmdMatch(args) {
@@ -99,6 +105,25 @@ try {
     const result = await importManualTrips(args.csv, args.source || 'manual');
     console.log(`Imported ${result.imported} trips.`);
     for (const y of result.byYear) console.log(`  ${y.year}: ${y.trips} trips, ${y.miles} miles`);
+  } else if (cmd === 'add') {
+    const r = await addManualTrip({
+      date: args.date,
+      miles: args.miles,
+      driveId: args.drive != null ? Number(args.drive) : null,
+      leg: args.leg,
+      reason: args.reason,
+    });
+    console.log(`Logged ${r.miles} business miles on ${r.date}.`);
+  } else if (cmd === 'drives') {
+    if (!args.from || !args.to) { usage(); process.exit(1); }
+    const drives = await fetchDrives(new Date(`${args.from}T00:00:00Z`), new Date(`${args.to}T00:00:00Z`));
+    for (const d of drives) {
+      console.log(
+        `#${d.id}  ${d.start.toISOString().slice(0, 16).replace('T', ' ')}Z  ` +
+          `${d.miles.toFixed(1)} mi  ${d.startAddress || '?'} -> ${d.endAddress || '?'}`
+      );
+    }
+    if (!drives.length) console.log('No drives in that window.');
   } else {
     usage();
     process.exit(cmd ? 1 : 0);
