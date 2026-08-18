@@ -6,6 +6,7 @@ import { fetchMeetings, getToken } from './graph.js';
 import { geocodeLocation } from './geocode.js';
 import { matchTrips } from './matcher.js';
 import { toCsv, summarize } from './report.js';
+import { importManualTrips } from './manual.js';
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -23,7 +24,10 @@ function usage() {
   console.log(`Usage:
   mileage auth                          Sign in to Microsoft Graph (device code)
   mileage match --from YYYY-MM-DD --to YYYY-MM-DD [--out log.csv]
-                                        Match drives to meetings and print/write the log`);
+                                        Match drives to meetings and print/write the log
+  mileage import --csv trips.csv [--source label]
+                                        Import historical trips (columns: date,leg,miles,reason)
+                                        into mileage.manual_trips; idempotent per source`);
 }
 
 async function cmdMatch(args) {
@@ -90,6 +94,11 @@ try {
     console.log('Signed in. Token cached in data/msal-cache.json.');
   } else if (cmd === 'match') {
     await cmdMatch(args);
+  } else if (cmd === 'import') {
+    if (!args.csv) { usage(); process.exit(1); }
+    const result = await importManualTrips(args.csv, args.source || 'manual');
+    console.log(`Imported ${result.imported} trips.`);
+    for (const y of result.byYear) console.log(`  ${y.year}: ${y.trips} trips, ${y.miles} miles`);
   } else {
     usage();
     process.exit(cmd ? 1 : 0);
