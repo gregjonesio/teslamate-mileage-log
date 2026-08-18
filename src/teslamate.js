@@ -1,0 +1,53 @@
+import pg from 'pg';
+import { config, requireConfig } from './config.js';
+
+const KM_TO_MI = 0.621371;
+
+/**
+ * Read completed drives from the TeslaMate database.
+ * Returns drives with UTC timestamps, miles, and start/end coordinates.
+ */
+export async function fetchDrives(fromDate, toDate) {
+  requireConfig(['teslamateDbUrl']);
+  const client = new pg.Client({ connectionString: config.teslamateDbUrl });
+  await client.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT d.id,
+              d.start_date,
+              d.end_date,
+              d.distance,
+              sp.latitude  AS start_lat,
+              sp.longitude AS start_lon,
+              ep.latitude  AS end_lat,
+              ep.longitude AS end_lon,
+              sa.display_name AS start_address,
+              ea.display_name AS end_address
+         FROM drives d
+         JOIN positions sp ON sp.id = d.start_position_id
+         JOIN positions ep ON ep.id = d.end_position_id
+         LEFT JOIN addresses sa ON sa.id = d.start_address_id
+         LEFT JOIN addresses ea ON ea.id = d.end_address_id
+        WHERE d.end_date IS NOT NULL
+          AND d.distance IS NOT NULL
+          AND d.start_date >= $1
+          AND d.start_date < $2
+        ORDER BY d.start_date`,
+      [fromDate, toDate]
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      start: new Date(r.start_date),
+      end: new Date(r.end_date),
+      miles: r.distance * KM_TO_MI,
+      startLat: Number(r.start_lat),
+      startLon: Number(r.start_lon),
+      endLat: Number(r.end_lat),
+      endLon: Number(r.end_lon),
+      startAddress: r.start_address || '',
+      endAddress: r.end_address || '',
+    }));
+  } finally {
+    await client.end();
+  }
+}

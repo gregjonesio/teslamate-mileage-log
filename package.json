@@ -1,0 +1,21 @@
+{
+  "name": "teslamate-mileage-log",
+  "version": "0.1.0",
+  "description": "Automatic business mileage log: matches TeslaMate drives to Outlook calendar meetings and produces an IRS-style mileage log.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "mileage": "src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.16.0",
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.0"
+  }
+}

@@ -1,0 +1,34 @@
+import 'dotenv/config';
+import { mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const dataDir = path.join(root, 'data');
+mkdirSync(dataDir, { recursive: true });
+
+function num(name, fallback) {
+  const v = process.env[name];
+  return v === undefined || v === '' ? fallback : Number(v);
+}
+
+export const config = {
+  teslamateDbUrl: process.env.TESLAMATE_DB_URL,
+  graphClientId: process.env.GRAPH_CLIENT_ID,
+  graphTenantId: process.env.GRAPH_TENANT_ID || 'common',
+  matchRadiusM: num('MATCH_RADIUS_M', 500),
+  arriveEarlyMin: num('ARRIVE_EARLY_MIN', 120),
+  arriveLateMin: num('ARRIVE_LATE_MIN', 20),
+  includeReturn: (process.env.INCLUDE_RETURN ?? 'true') !== 'false',
+  mileageRate: num('MILEAGE_RATE', 0.7),
+  nominatimEmail: process.env.NOMINATIM_EMAIL || '',
+};
+
+export function requireConfig(keys) {
+  const missing = keys.filter((k) => !config[k]);
+  if (missing.length) {
+    throw new Error(
+      `Missing required configuration: ${missing.join(', ')}. Copy .env.example to .env and fill it in.`
+    );
+  }
+}
