@@ -28,8 +28,11 @@ export async function fetchDrives(fromDate, toDate) {
          LEFT JOIN addresses ea ON ea.id = d.end_address_id
         WHERE d.end_date IS NOT NULL
           AND d.distance IS NOT NULL
-          AND d.start_date >= $1
-          AND d.start_date < $2
+          -- The column is a timestamp without time zone holding UTC, and a bound Date
+          -- arrives with an offset that a plain cast would silently discard, turning a
+          -- local-day window back into a UTC-day one. Convert the instant explicitly.
+          AND d.start_date >= $1::timestamptz AT TIME ZONE 'UTC'
+          AND d.start_date < $2::timestamptz AT TIME ZONE 'UTC'
         ORDER BY d.start_date`,
       [fromDate, toDate]
     );
