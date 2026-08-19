@@ -20,6 +20,10 @@ export const config = {
   arriveEarlyMin: num('ARRIVE_EARLY_MIN', 120),
   arriveLateMin: num('ARRIVE_LATE_MIN', 20),
   includeReturn: (process.env.INCLUDE_RETURN ?? 'true') !== 'false',
+  hubsFile: process.env.HUBS_FILE || path.join(root, 'hubs.json'),
+  hubRadiusM: num('HUB_RADIUS_M', 750),
+  hubDepartEarlyMin: num('HUB_DEPART_EARLY_MIN', 480),
+  hubReturnMaxHours: num('HUB_RETURN_MAX_HOURS', 12),
   mileageRate: num('MILEAGE_RATE', 0.7),
   nominatimEmail: process.env.NOMINATIM_EMAIL || '',
 };

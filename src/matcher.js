@@ -20,11 +20,18 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
  *
  * meetings: [{ id, subject, location, start, end, lat, lon }] (already geocoded; lat/lon may be null)
  * drives:   [{ id, start, end, miles, startLat, startLon, endLat, endLon, startAddress, endAddress }]
- * opts:     { radiusM, arriveEarlyMin, arriveLateMin, includeReturn }
+ * hubs:     [{ name, lat, lon, radiusM? }] transport hubs (stations, airports)
+ * opts:     { radiusM, arriveEarlyMin, arriveLateMin, includeReturn,
+ *             hubs, hubRadiusM, hubDepartEarlyMin, hubReturnMaxHours }
  *
  * Returns entries: one per meeting that matched an outbound drive, with an optional
  * return drive (the first later drive departing from the meeting location).
  * A drive is used at most once across all meetings.
+ *
+ * Two passes. The first matches drives that ended at the meeting itself. The second
+ * only sees meetings the first could not explain, and looks for a drive that ended at
+ * a transport hub instead: the rail or air leg that follows is invisible to the car,
+ * so these are marked `via-hub` for a human to confirm rather than trusted outright.
  */
 export function matchTrips(meetings, drives, opts = {}) {
   const {
@@ -32,6 +39,10 @@ export function matchTrips(meetings, drives, opts = {}) {
     arriveEarlyMin = 120,
     arriveLateMin = 20,
     includeReturn = true,
+    hubs = [],
+    hubRadiusM = 750,
+    hubDepartEarlyMin = 480,
+    hubReturnMaxHours = 12,
   } = opts;
 
   const usedDrives = new Set();
@@ -59,8 +70,10 @@ export function matchTrips(meetings, drives, opts = {}) {
     usedDrives.add(best.drive.id);
     const entry = {
       meeting,
+      destination: meeting.location,
       outbound: best.drive,
       outboundDistanceM: Math.round(best.dist),
+      hub: null,
       return: null,
       confidence: best.dist <= 300 ? 'high' : 'medium',
     };
@@ -84,5 +97,73 @@ export function matchTrips(meetings, drives, opts = {}) {
     entries.push(entry);
   }
 
-  return entries;
+  // Second pass: meetings reached by rail or air from a transport hub.
+  const matched = new Set(entries.map((e) => e.meeting.id));
+  for (const meeting of sorted) {
+    if (matched.has(meeting.id) || !hubs.length) continue;
+
+    const earliest = new Date(meeting.start.getTime() - hubDepartEarlyMin * 60000);
+    let best = null;
+    for (const drive of drives) {
+      if (usedDrives.has(drive.id)) continue;
+      if (drive.end < earliest || drive.end > meeting.start) continue;
+      const hub = nearestHub(drive.endLat, drive.endLon, hubs, hubRadiusM);
+      if (!hub) continue;
+      // The last departure before the meeting is the likeliest one.
+      if (!best || drive.end > best.drive.end) best = { drive, hub: hub.hub, dist: hub.dist };
+    }
+    if (!best) continue;
+
+    usedDrives.add(best.drive.id);
+    const entry = {
+      meeting,
+      destination: best.hub.name,
+      outbound: best.drive,
+      outboundDistanceM: Math.round(best.dist),
+      hub: best.hub,
+      return: null,
+      confidence: 'via-hub',
+    };
+
+    if (includeReturn) {
+      // The drive home leaves from the same hub, after the meeting ended. Rail and
+      // air schedules make this much later than a drive back from the venue itself.
+      const back = drives
+        .filter(
+          (d) =>
+            !usedDrives.has(d.id) &&
+            d.start > meeting.end &&
+            d.start.getTime() - meeting.end.getTime() < hubReturnMaxHours * 3600 * 1000 &&
+            withinHub(d.startLat, d.startLon, best.hub, hubRadiusM)
+        )
+        .sort((a, b) => a.start - b.start);
+      if (back.length) {
+        entry.return = back[0];
+        usedDrives.add(back[0].id);
+      }
+    }
+
+    entries.push(entry);
+  }
+
+  return entries.sort((a, b) => a.meeting.start - b.meeting.start);
+}
+
+function hubRadius(hub, fallbackM) {
+  return hub.radiusM ?? fallbackM;
+}
+
+function withinHub(lat, lon, hub, fallbackM) {
+  return haversineMeters(lat, lon, hub.lat, hub.lon) <= hubRadius(hub, fallbackM);
+}
+
+/** Closest hub containing the point, or null. */
+function nearestHub(lat, lon, hubs, fallbackM) {
+  let best = null;
+  for (const hub of hubs) {
+    const dist = haversineMeters(lat, lon, hub.lat, hub.lon);
+    if (dist > hubRadius(hub, fallbackM)) continue;
+    if (!best || dist < best.dist) best = { hub, dist };
+  }
+  return best;
 }

@@ -1,0 +1,13 @@
+[
+  {
+    "name": "Santa Ana Regional Transportation Center",
+    "lat": 33.7503,
+    "lon": -117.8583
+  },
+  {
+    "name": "John Wayne Airport",
+    "lat": 33.6757,
+    "lon": -117.8683,
+    "radiusM": 1200
+  }
+]

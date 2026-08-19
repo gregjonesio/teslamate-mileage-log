@@ -86,3 +86,92 @@ test('meetings without geocoded coordinates are skipped', () => {
   m.lon = null;
   assert.equal(matchTrips([m], drives).length, 0);
 });
+
+// A rail/air trip: the car stops at the hub, the meeting is a long way past it.
+const HUB = { name: 'Union Station', lat: 33.7503, lon: -117.8583 };
+const NEAR_HUB = { lat: 33.7509, lon: -117.8566 }; // ~170 m from HUB
+const HUBS = [HUB];
+
+test('matches a drive that ended at a transport hub to a distant meeting', () => {
+  const drives = [drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1)];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  const entries = matchTrips(meetings, drives, { hubs: HUBS });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].outbound.id, 1);
+  assert.equal(entries[0].confidence, 'via-hub');
+  assert.equal(entries[0].hub.name, 'Union Station');
+  assert.equal(entries[0].destination, 'Union Station');
+});
+
+test('pairs the drive home from the same hub as the return leg', () => {
+  const drives = [
+    drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1),
+    drive(2, '2026-08-20T01:30:00Z', '2026-08-20T02:05:00Z', NEAR_HUB, OFFICE, 14.1),
+  ];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  const entries = matchTrips(meetings, drives, { hubs: HUBS });
+  assert.equal(entries[0].return.id, 2);
+});
+
+test('a return drive from the hub beyond the cap is left unclaimed', () => {
+  const drives = [
+    drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1),
+    drive(2, '2026-08-20T12:00:00Z', '2026-08-20T12:35:00Z', NEAR_HUB, OFFICE, 14.1),
+  ];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  const entries = matchTrips(meetings, drives, { hubs: HUBS, hubReturnMaxHours: 12 });
+  assert.equal(entries[0].return, null);
+});
+
+test('hub matching respects the departure window', () => {
+  // Left for the hub 10 hours before the meeting; the default window is 8.
+  const drives = [drive(1, '2026-08-19T09:30:00Z', '2026-08-19T10:00:00Z', OFFICE, NEAR_HUB, 14.1)];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  assert.equal(matchTrips(meetings, drives, { hubs: HUBS }).length, 0);
+  assert.equal(matchTrips(meetings, drives, { hubs: HUBS, hubDepartEarlyMin: 720 }).length, 1);
+});
+
+test('a drive reaching the hub after the meeting started is not the outbound leg', () => {
+  const drives = [drive(1, '2026-08-19T20:30:00Z', '2026-08-19T21:00:00Z', OFFICE, NEAR_HUB, 14.1)];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  assert.equal(matchTrips(meetings, drives, { hubs: HUBS }).length, 0);
+});
+
+test('a direct drive to the venue wins, and the hub drive stays unclaimed', () => {
+  const drives = [
+    drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1),
+    drive(2, '2026-08-19T19:10:00Z', '2026-08-19T19:40:00Z', OFFICE, NEAR_VENUE),
+  ];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  const entries = matchTrips(meetings, drives, { hubs: HUBS });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].outbound.id, 2);
+  assert.equal(entries[0].confidence, 'high');
+  assert.equal(entries[0].hub, null);
+});
+
+test('the last departure before the meeting is the one that counts', () => {
+  const drives = [
+    drive(1, '2026-08-19T14:00:00Z', '2026-08-19T14:30:00Z', OFFICE, NEAR_HUB, 14.1),
+    drive(2, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1),
+  ];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  assert.equal(matchTrips(meetings, drives, { hubs: HUBS })[0].outbound.id, 2);
+});
+
+test('without configured hubs nothing changes', () => {
+  const drives = [drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1)];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  assert.equal(matchTrips(meetings, drives).length, 0);
+});
+
+test('per-hub radius overrides the default', () => {
+  const far = { lat: 33.7570, lon: -117.8583 }; // ~745 m from HUB
+  const drives = [drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, far, 14.1)];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  assert.equal(matchTrips(meetings, drives, { hubs: [HUB], hubRadiusM: 500 }).length, 0);
+  assert.equal(
+    matchTrips(meetings, drives, { hubs: [{ ...HUB, radiusM: 1200 }], hubRadiusM: 500 }).length,
+    1
+  );
+});

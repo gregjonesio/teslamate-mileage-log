@@ -70,6 +70,26 @@ export async function addManualTrip({ date, miles, driveId, leg, reason }) {
   }
 }
 
+/**
+ * TeslaMate drive ids already logged through `add --drive`, so a drive is only
+ * ever prompted for once and cannot be counted twice.
+ */
+export async function loggedDriveIds() {
+  const client = newClient();
+  await client.connect();
+  try {
+    const { rows } = await client.query(
+      "SELECT source FROM mileage.manual_trips WHERE source LIKE 'drive-%'"
+    );
+    return new Set(rows.map((r) => Number(r.source.slice('drive-'.length))).filter(Number.isFinite));
+  } catch (err) {
+    if (err.code === '42P01') return new Set(); // no manual_trips table yet
+    throw err;
+  } finally {
+    await client.end();
+  }
+}
+
 export async function importManualTrips(file, source) {
   const rows = parseCsv(readFileSync(file, 'utf8'));
   const header = rows.shift().map((h) => h.trim().toLowerCase());

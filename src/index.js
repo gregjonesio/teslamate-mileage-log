@@ -6,7 +6,8 @@ import { fetchMeetings, getToken } from './graph.js';
 import { geocodeLocation } from './geocode.js';
 import { matchTrips } from './matcher.js';
 import { toCsv, summarize } from './report.js';
-import { importManualTrips, addManualTrip } from './manual.js';
+import { importManualTrips, addManualTrip, loggedDriveIds } from './manual.js';
+import { loadHubs } from './hubs.js';
 import { parseDateRange, localDateString, localDateTimeString } from './dates.js';
 
 function parseArgs(argv) {
@@ -61,11 +62,18 @@ async function cmdMatch(args) {
   const drives = await fetchDrives(from, to);
   console.error(`  ${drives.length} drives`);
 
+  const hubs = loadHubs();
+  if (hubs.length) console.error(`  ${hubs.length} transport hubs configured`);
+
   const entries = matchTrips(meetings, drives, {
     radiusM: config.matchRadiusM,
     arriveEarlyMin: config.arriveEarlyMin,
     arriveLateMin: config.arriveLateMin,
     includeReturn: config.includeReturn,
+    hubs,
+    hubRadiusM: config.hubRadiusM,
+    hubDepartEarlyMin: config.hubDepartEarlyMin,
+    hubReturnMaxHours: config.hubReturnMaxHours,
   });
 
   const csv = toCsv(entries, { mileageRate: config.mileageRate });
@@ -81,6 +89,20 @@ async function cmdMatch(args) {
     `\n${s.trips} matched trips, ${s.totalMiles.toFixed(1)} business miles, ` +
       `$${s.deduction.toFixed(2)} at $${config.mileageRate}/mi`
   );
+  const viaHub = entries.filter((e) => e.hub);
+  if (viaHub.length) {
+    console.error(`
+${viaHub.length} trips matched via a transport hub. The rail or air leg is`);
+    console.error('not GPS-verified, so confirm each one before filing:');
+    for (const e of viaHub) {
+      const legs = e.return ? `${e.outbound.id}+${e.return.id}` : String(e.outbound.id);
+      console.error(
+        `  ${localDateString(e.meeting.start)}  drove to ${e.hub.name} (#${legs})` +
+          `${e.return ? '' : ', no return drive yet'}  for  ${e.meeting.subject}`
+      );
+    }
+  }
+
   const unmatched = meetings.filter(
     (m) => m.lat != null && !entries.some((e) => e.meeting.id === m.id)
   );
@@ -89,6 +111,52 @@ async function cmdMatch(args) {
     for (const m of unmatched) {
       console.error(`  ${localDateString(m.start)}  ${m.subject}  @ ${m.location}`);
     }
+  }
+
+  await reportUnclaimedDrives(drives, entries);
+}
+
+/** First 4 address components: enough to recognise a place, short enough to scan. */
+function shortAddress(address) {
+  if (!address) return '?';
+  return address.split(',').slice(0, 4).map((part) => part.trim()).join(', ');
+}
+
+/**
+ * Drives no meeting explained. Without this the match output says nothing about them
+ * and real business miles disappear, which is the failure this log exists to avoid.
+ */
+async function reportUnclaimedDrives(drives, entries) {
+  const claimed = new Set();
+  for (const e of entries) {
+    claimed.add(e.outbound.id);
+    if (e.return) claimed.add(e.return.id);
+  }
+  const already = await loggedDriveIds();
+  const unclaimed = drives.filter((d) => !claimed.has(d.id) && !already.has(d.id));
+  const logged = drives.filter((d) => !claimed.has(d.id) && already.has(d.id));
+
+  if (logged.length) {
+    console.error(
+      `
+${logged.length} unmatched drives were already logged by hand ` +
+        `(#${logged.map((d) => d.id).join(', #')}).`
+    );
+  }
+  if (!unclaimed.length) return;
+
+  const miles = unclaimed.reduce((sum, d) => sum + d.miles, 0);
+  console.error(
+    `
+${unclaimed.length} drives (${miles.toFixed(1)} mi) matched no meeting. ` +
+      'Log any that were business:'
+  );
+  for (const d of unclaimed) {
+    console.error(
+      `  #${d.id}  ${localDateTimeString(d.start)}  ${d.miles.toFixed(1)} mi  ` +
+        `${shortAddress(d.startAddress)} -> ${shortAddress(d.endAddress)}`
+    );
+    console.error(`      mileage add --drive ${d.id} --reason "..."`);
   }
 }
 

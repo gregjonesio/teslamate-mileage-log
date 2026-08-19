@@ -44,13 +44,33 @@ node src/index.js match --from 2026-01-01 --to 2026-06-30 --out mileage-h1.csv
 
 Output columns: `date, purpose, destination, outbound_miles, return_miles, total_miles, deduction, confidence, drive_ids`.
 
-- `confidence` is `high` when the drive ended within 300 m of the geocoded meeting address, `medium` within the configured radius (default 500 m). Review medium rows before filing.
+- `confidence` is `high` when the drive ended within 300 m of the geocoded meeting address, `medium` within the configured radius (default 500 m), and `via-hub` for a trip that continued by rail or air (see below). Review anything that is not `high` before filing.
 - `drive_ids` are TeslaMate drive ids, so every logged trip is auditable back to raw GPS data.
 - Meetings with a physical location that matched no drive are listed on stderr so nothing disappears silently.
+- **Drives that matched no meeting are listed too**, with the `add --drive` command to log each one. A mileage log fails quietly when a business drive is simply never mentioned, so both sides of the match are reported. Drives already logged by hand are not offered again.
 
 ## Matching rules
 
 A meeting matches a drive when the drive **ended within `MATCH_RADIUS_M` meters** of the meeting's geocoded address, in the window from `ARRIVE_EARLY_MIN` minutes before the meeting start to `ARRIVE_LATE_MIN` minutes after. If `INCLUDE_RETURN=true`, the first later drive **departing** from that location (within 6 hours of the meeting end) is logged as the return leg. Each drive is used at most once. Virtual meetings (Zoom/Teams/Meet/Webex links as the location) are excluded automatically.
+
+## Trips that continue by rail or air
+
+If you drive to a station or airport and fly or take the train the rest of the way, no drive ever ends near the meeting, so the rule above cannot see the trip at all. List the places where that happens:
+
+```
+cp hubs.example.json hubs.json   # then edit; hubs.json is gitignored
+```
+
+```json
+[
+  { "name": "Santa Ana Regional Transportation Center", "lat": 33.7514, "lon": -117.8569 },
+  { "name": "John Wayne Airport", "lat": 33.6757, "lon": -117.8683, "radiusM": 1200 }
+]
+```
+
+A meeting that no drive explains directly is then matched to the **last drive ending at a hub** within `HUB_DEPART_EARLY_MIN` minutes before it (default 480, since rail and air legs start hours ahead). The drive home from the same hub, starting within `HUB_RETURN_MAX_HOURS` after the meeting ends (default 12), becomes the return leg. `HUB_RADIUS_M` (default 750 m) covers terminal parking, and any hub can override it with `radiusM`.
+
+These rows are logged with the hub as the destination and `via-hub` confidence, and are called out separately on stderr. The leg beyond the hub is not GPS-verified, so a direct match always wins over a hub match, and hub matches are for you to confirm rather than to trust. Without a `hubs.json` the feature is simply off.
 
 ## Privacy
 
@@ -64,7 +84,7 @@ This produces a records-based mileage log; it is not tax advice. Check the curre
 
 - `.ics` file input as an alternative to Microsoft Graph (Google Calendar / iCloud users)
 - Pluggable trip sources (direct Tesla Fleet API poller, Tessie)
-- Interactive review command for medium-confidence matches
+- Interactive review command for medium-confidence and via-hub matches
 - Home/office geofences to auto-classify commute vs business legs
 
 ## License

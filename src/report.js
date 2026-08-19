@@ -29,7 +29,7 @@ export function toCsv(entries, { mileageRate = 0.7 } = {}) {
     return [
       localDateString(e.meeting.start),
       e.meeting.subject,
-      e.meeting.location,
+      e.destination ?? e.meeting.location,
       out.toFixed(1),
       e.return ? ret.toFixed(1) : '',
       total.toFixed(1),
