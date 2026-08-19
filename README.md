@@ -37,8 +37,10 @@ node src/index.js auth # one-time device-code sign-in; token cached under data/
 ## Usage
 
 ```
-node src/index.js match --from 2026-01-01 --to 2026-07-01 --out mileage-h1.csv
+node src/index.js match --from 2026-01-01 --to 2026-06-30 --out mileage-h1.csv
 ```
+
+`--from` and `--to` are local calendar days and `--to` is inclusive, so the example above covers Jan 1 through Jun 30. TeslaMate stores drive times as UTC, and both the window and the logged date are converted to local time, so an evening drive is logged on the day it was actually driven.
 
 Output columns: `date, purpose, destination, outbound_miles, return_miles, total_miles, deduction, confidence, drive_ids`.
 

@@ -7,6 +7,7 @@ import { geocodeLocation } from './geocode.js';
 import { matchTrips } from './matcher.js';
 import { toCsv, summarize } from './report.js';
 import { importManualTrips, addManualTrip } from './manual.js';
+import { parseDateRange, localDateString, localDateTimeString } from './dates.js';
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -25,6 +26,7 @@ function usage() {
   mileage auth                          Sign in to Microsoft Graph (device code)
   mileage match --from YYYY-MM-DD --to YYYY-MM-DD [--out log.csv]
                                         Match drives to meetings and print/write the log
+                                        Dates are local calendar days; --to is inclusive
   mileage import --csv trips.csv [--source label]
                                         Import historical trips (columns: date,leg,miles,reason)
                                         into mileage.manual_trips; idempotent per source
@@ -41,8 +43,7 @@ async function cmdMatch(args) {
     usage();
     process.exit(1);
   }
-  const from = new Date(`${args.from}T00:00:00Z`);
-  const to = new Date(`${args.to}T00:00:00Z`);
+  const { from, to } = parseDateRange(args.from, args.to);
 
   console.error(`Fetching meetings ${args.from} .. ${args.to} ...`);
   const meetings = await fetchMeetings(from, to);
@@ -86,7 +87,7 @@ async function cmdMatch(args) {
   if (unmatched.length) {
     console.error(`\n${unmatched.length} meetings had no matching drive (virtual, carpooled, or skipped):`);
     for (const m of unmatched) {
-      console.error(`  ${m.start.toISOString().slice(0, 10)}  ${m.subject}  @ ${m.location}`);
+      console.error(`  ${localDateString(m.start)}  ${m.subject}  @ ${m.location}`);
     }
   }
 }
@@ -116,10 +117,11 @@ try {
     console.log(`Logged ${r.miles} business miles on ${r.date}.`);
   } else if (cmd === 'drives') {
     if (!args.from || !args.to) { usage(); process.exit(1); }
-    const drives = await fetchDrives(new Date(`${args.from}T00:00:00Z`), new Date(`${args.to}T00:00:00Z`));
+    const { from, to } = parseDateRange(args.from, args.to);
+    const drives = await fetchDrives(from, to);
     for (const d of drives) {
       console.log(
-        `#${d.id}  ${d.start.toISOString().slice(0, 16).replace('T', ' ')}Z  ` +
+        `#${d.id}  ${localDateTimeString(d.start)}  ` +
           `${d.miles.toFixed(1)} mi  ${d.startAddress || '?'} -> ${d.endAddress || '?'}`
       );
     }

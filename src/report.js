@@ -1,3 +1,5 @@
+import { localDateString } from './dates.js';
+
 function csvEscape(value) {
   const s = String(value ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -25,7 +27,7 @@ export function toCsv(entries, { mileageRate = 0.7 } = {}) {
     const ret = e.return ? e.return.miles : 0;
     const total = out + ret;
     return [
-      e.meeting.start.toISOString().slice(0, 10),
+      localDateString(e.meeting.start),
       e.meeting.subject,
       e.meeting.location,
       out.toFixed(1),

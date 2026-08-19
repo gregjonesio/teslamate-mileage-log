@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import pg from 'pg';
-import { config, requireConfig } from './config.js';
+import { newClient } from './db.js';
+import { localDateString } from './dates.js';
 
 /**
  * Manual/historical trips live in their own schema in the TeslaMate database
@@ -45,8 +45,7 @@ export function parseCsv(text) {
  * GPS-verified while the human supplies the business purpose.
  */
 export async function addManualTrip({ date, miles, driveId, leg, reason }) {
-  requireConfig(['teslamateDbUrl']);
-  const client = new pg.Client({ connectionString: config.teslamateDbUrl });
+  const client = newClient();
   await client.connect();
   try {
     if (driveId != null) {
@@ -56,7 +55,7 @@ export async function addManualTrip({ date, miles, driveId, leg, reason }) {
       );
       if (!d.rows.length) throw new Error(`No TeslaMate drive with id ${driveId}`);
       miles = d.rows[0].distance * 0.621371;
-      date = date || d.rows[0].start_date.toISOString().slice(0, 10);
+      date = date || localDateString(d.rows[0].start_date);
     }
     if (!date || !Number.isFinite(Number(miles))) {
       throw new Error('Need --date and --miles, or --drive <id>');
@@ -72,7 +71,6 @@ export async function addManualTrip({ date, miles, driveId, leg, reason }) {
 }
 
 export async function importManualTrips(file, source) {
-  requireConfig(['teslamateDbUrl']);
   const rows = parseCsv(readFileSync(file, 'utf8'));
   const header = rows.shift().map((h) => h.trim().toLowerCase());
   const idx = Object.fromEntries(['date', 'leg', 'miles', 'reason'].map((c) => [c, header.indexOf(c)]));
@@ -80,7 +78,7 @@ export async function importManualTrips(file, source) {
     throw new Error(`CSV must have at least "date" and "miles" columns; got: ${header.join(', ')}`);
   }
 
-  const client = new pg.Client({ connectionString: config.teslamateDbUrl });
+  const client = newClient();
   await client.connect();
   try {
     await client.query('CREATE SCHEMA IF NOT EXISTS mileage');

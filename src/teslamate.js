@@ -1,5 +1,4 @@
-import pg from 'pg';
-import { config, requireConfig } from './config.js';
+import { newClient } from './db.js';
 
 const KM_TO_MI = 0.621371;
 
@@ -8,8 +7,7 @@ const KM_TO_MI = 0.621371;
  * Returns drives with UTC timestamps, miles, and start/end coordinates.
  */
 export async function fetchDrives(fromDate, toDate) {
-  requireConfig(['teslamateDbUrl']);
-  const client = new pg.Client({ connectionString: config.teslamateDbUrl });
+  const client = newClient();
   await client.connect();
   try {
     const { rows } = await client.query(
