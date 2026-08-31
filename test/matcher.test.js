@@ -87,6 +87,65 @@ test('meetings without geocoded coordinates are skipped', () => {
   assert.equal(matchTrips([m], drives).length, 0);
 });
 
+// Parking shuffles: a sub-mile hop near the venue must not be taken as the return.
+const VENUE_BLOCK = { lat: 34.0946, lon: -118.3287 }; // ~200 m from VENUE
+const AWAY = { lat: 34.0985, lon: -118.3287 }; // ~630 m from VENUE, ~430 m from VENUE_BLOCK
+
+test('a parking shuffle near the venue is not the return leg', () => {
+  const drives = [
+    drive(1, '2026-08-10T16:10:00Z', '2026-08-10T16:40:00Z', OFFICE, NEAR_VENUE, 43.9),
+    drive(2, '2026-08-10T18:05:00Z', '2026-08-10T18:07:00Z', NEAR_VENUE, VENUE_BLOCK, 0.1),
+    drive(3, '2026-08-10T18:30:00Z', '2026-08-10T19:20:00Z', VENUE_BLOCK, OFFICE, 46.0),
+  ];
+  const meetings = [meeting('m1', '2026-08-10T17:00:00Z', '2026-08-10T18:00:00Z')];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].outbound.id, 1);
+  assert.equal(entries[0].return.id, 3);
+});
+
+test('the return is found even when a shuffle moved the car outside the match radius', () => {
+  const drives = [
+    drive(1, '2026-08-10T16:10:00Z', '2026-08-10T16:40:00Z', OFFICE, NEAR_VENUE, 43.9),
+    drive(2, '2026-08-10T18:05:00Z', '2026-08-10T18:08:00Z', NEAR_VENUE, AWAY, 0.4),
+    drive(3, '2026-08-10T18:30:00Z', '2026-08-10T19:20:00Z', AWAY, OFFICE, 46.0),
+  ];
+  const meetings = [meeting('m1', '2026-08-10T17:00:00Z', '2026-08-10T18:00:00Z')];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries[0].return.id, 3);
+});
+
+test('a drive exactly at the reposition threshold is still a shuffle', () => {
+  const drives = [
+    drive(1, '2026-08-10T16:10:00Z', '2026-08-10T16:40:00Z', OFFICE, NEAR_VENUE, 43.9),
+    drive(2, '2026-08-10T18:05:00Z', '2026-08-10T18:10:00Z', NEAR_VENUE, VENUE_BLOCK, 1.0),
+    drive(3, '2026-08-10T18:30:00Z', '2026-08-10T19:20:00Z', VENUE_BLOCK, OFFICE, 46.0),
+  ];
+  const meetings = [meeting('m1', '2026-08-10T17:00:00Z', '2026-08-10T18:00:00Z')];
+  assert.equal(matchTrips(meetings, drives)[0].return.id, 3);
+});
+
+test('a drive with unknown mileage is never treated as a shuffle', () => {
+  // null <= 1 is true in JS; such a drive must stay a visible return candidate
+  // (and land in the CSV for review) instead of silently vanishing as a hop.
+  const drives = [
+    drive(1, '2026-08-10T16:10:00Z', '2026-08-10T16:40:00Z', OFFICE, NEAR_VENUE, 43.9),
+    drive(2, '2026-08-10T18:05:00Z', '2026-08-10T18:07:00Z', NEAR_VENUE, VENUE_BLOCK, null),
+  ];
+  const meetings = [meeting('m1', '2026-08-10T17:00:00Z', '2026-08-10T18:00:00Z')];
+  assert.equal(matchTrips(meetings, drives)[0].return.id, 2);
+});
+
+test('with only a shuffle available the return stays empty', () => {
+  const drives = [
+    drive(1, '2026-08-10T16:10:00Z', '2026-08-10T16:40:00Z', OFFICE, NEAR_VENUE, 43.9),
+    drive(2, '2026-08-10T18:05:00Z', '2026-08-10T18:07:00Z', NEAR_VENUE, VENUE_BLOCK, 0.1),
+  ];
+  const meetings = [meeting('m1', '2026-08-10T17:00:00Z', '2026-08-10T18:00:00Z')];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries[0].return, null);
+});
+
 // A rail/air trip: the car stops at the hub, the meeting is a long way past it.
 const HUB = { name: 'Union Station', lat: 33.7503, lon: -117.8583 };
 const NEAR_HUB = { lat: 33.7509, lon: -117.8566 }; // ~170 m from HUB
@@ -111,6 +170,18 @@ test('pairs the drive home from the same hub as the return leg', () => {
   const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
   const entries = matchTrips(meetings, drives, { hubs: HUBS });
   assert.equal(entries[0].return.id, 2);
+});
+
+test('a parking shuffle at the hub is not the drive home', () => {
+  const NEAR_HUB2 = { lat: 33.7523, lon: -117.8583 }; // ~220 m from HUB
+  const drives = [
+    drive(1, '2026-08-19T16:11:00Z', '2026-08-19T16:45:00Z', OFFICE, NEAR_HUB, 14.1),
+    drive(2, '2026-08-19T22:30:00Z', '2026-08-19T22:33:00Z', NEAR_HUB, NEAR_HUB2, 0.2),
+    drive(3, '2026-08-19T23:30:00Z', '2026-08-20T00:05:00Z', NEAR_HUB2, OFFICE, 14.1),
+  ];
+  const meetings = [meeting('m1', '2026-08-19T20:00:00Z', '2026-08-19T22:00:00Z')];
+  const entries = matchTrips(meetings, drives, { hubs: HUBS });
+  assert.equal(entries[0].return.id, 3);
 });
 
 test('a return drive from the hub beyond the cap is left unclaimed', () => {

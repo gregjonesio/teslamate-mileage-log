@@ -21,7 +21,7 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
  * meetings: [{ id, subject, location, start, end, lat, lon }] (already geocoded; lat/lon may be null)
  * drives:   [{ id, start, end, miles, startLat, startLon, endLat, endLon, startAddress, endAddress }]
  * hubs:     [{ name, lat, lon, radiusM? }] transport hubs (stations, airports)
- * opts:     { radiusM, arriveEarlyMin, arriveLateMin, includeReturn,
+ * opts:     { radiusM, arriveEarlyMin, arriveLateMin, includeReturn, repositionMaxMiles,
  *             hubs, hubRadiusM, hubDepartEarlyMin, hubReturnMaxHours }
  *
  * Returns entries: one per meeting that matched an outbound drive, with an optional
@@ -39,6 +39,7 @@ export function matchTrips(meetings, drives, opts = {}) {
     arriveEarlyMin = 120,
     arriveLateMin = 20,
     includeReturn = true,
+    repositionMaxMiles = 1,
     hubs = [],
     hubRadiusM = 750,
     hubDepartEarlyMin = 480,
@@ -79,18 +80,18 @@ export function matchTrips(meetings, drives, opts = {}) {
     };
 
     if (includeReturn) {
-      const candidates = drives
+      const later = drives
         .filter(
           (d) =>
             !usedDrives.has(d.id) &&
             d.start > meeting.start &&
-            d.start.getTime() - meeting.end.getTime() < 6 * 3600 * 1000 &&
-            haversineMeters(d.startLat, d.startLon, meeting.lat, meeting.lon) <= radiusM
+            d.start.getTime() - meeting.end.getTime() < 6 * 3600 * 1000
         )
         .sort((a, b) => a.start - b.start);
-      if (candidates.length) {
-        entry.return = candidates[0];
-        usedDrives.add(candidates[0].id);
+      const ret = pickReturn(later, { lat: meeting.lat, lon: meeting.lon }, radiusM, repositionMaxMiles);
+      if (ret) {
+        entry.return = ret;
+        usedDrives.add(ret.id);
       }
     }
 
@@ -128,18 +129,18 @@ export function matchTrips(meetings, drives, opts = {}) {
     if (includeReturn) {
       // The drive home leaves from the same hub, after the meeting ended. Rail and
       // air schedules make this much later than a drive back from the venue itself.
-      const back = drives
+      const later = drives
         .filter(
           (d) =>
             !usedDrives.has(d.id) &&
             d.start > meeting.end &&
-            d.start.getTime() - meeting.end.getTime() < hubReturnMaxHours * 3600 * 1000 &&
-            withinHub(d.startLat, d.startLon, best.hub, hubRadiusM)
+            d.start.getTime() - meeting.end.getTime() < hubReturnMaxHours * 3600 * 1000
         )
         .sort((a, b) => a.start - b.start);
-      if (back.length) {
-        entry.return = back[0];
-        usedDrives.add(back[0].id);
+      const ret = pickReturn(later, best.hub, hubRadius(best.hub, hubRadiusM), repositionMaxMiles);
+      if (ret) {
+        entry.return = ret;
+        usedDrives.add(ret.id);
       }
     }
 
@@ -149,12 +150,35 @@ export function matchTrips(meetings, drives, opts = {}) {
   return entries.sort((a, b) => a.meeting.start - b.meeting.start);
 }
 
-function hubRadius(hub, fallbackM) {
-  return hub.radiusM ?? fallbackM;
+/**
+ * Pick the return leg: the first substantive drive leaving the place the car
+ * was parked. Short repositioning hops (moving the car down the block, in and
+ * out of a parking structure) also depart from the venue, and claiming one as
+ * the return leaves the real drive home unclaimed. Skip any drive of
+ * repositionMaxMiles or less, but remember where it moved the car: the true
+ * return departs from there, possibly outside the venue's own radius.
+ * `candidates` must already be time-filtered and sorted by start.
+ */
+function pickReturn(candidates, origin, radiusM, repositionMaxMiles) {
+  const anchors = [{ lat: origin.lat, lon: origin.lon }];
+  for (const drive of candidates) {
+    const nearCar = anchors.some(
+      (a) => haversineMeters(drive.startLat, drive.startLon, a.lat, a.lon) <= radiusM
+    );
+    if (!nearCar) continue;
+    // Non-finite mileage must not silently pass the `<=` (null <= 1 is true);
+    // such a drive stays a visible return candidate instead of vanishing.
+    if (Number.isFinite(drive.miles) && drive.miles <= repositionMaxMiles) {
+      anchors.push({ lat: drive.endLat, lon: drive.endLon });
+      continue;
+    }
+    return drive;
+  }
+  return null;
 }
 
-function withinHub(lat, lon, hub, fallbackM) {
-  return haversineMeters(lat, lon, hub.lat, hub.lon) <= hubRadius(hub, fallbackM);
+function hubRadius(hub, fallbackM) {
+  return hub.radiusM ?? fallbackM;
 }
 
 /** Closest hub containing the point, or null. */
