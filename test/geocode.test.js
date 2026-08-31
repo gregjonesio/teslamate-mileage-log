@@ -18,3 +18,10 @@ test('venue with parenthesized address yields address and venue fallbacks', () =
 test('deduplicates and drops empties', () => {
   assert.deepEqual(candidates('  Somewhere  '), ['Somewhere']);
 });
+
+test('a structured address from the event outranks the display name', () => {
+  assert.deepEqual(candidates('Some Venue', '2800 E Observatory Rd, Los Angeles, CA'), [
+    '2800 E Observatory Rd, Los Angeles, CA',
+    'Some Venue',
+  ]);
+});

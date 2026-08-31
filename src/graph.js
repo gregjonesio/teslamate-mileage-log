@@ -113,6 +113,33 @@ export async function getToken({ interactive = false } = {}) {
 }
 
 /**
+ * Normalise a Graph event location. When a venue was picked from Outlook's
+ * location search, the event itself carries a structured street address and
+ * coordinates; the display name alone is often just a venue name ("Joe's
+ * Grill") that no geocoder can resolve. Keep all three.
+ */
+export function parseEventLocation(location) {
+  const name = location?.displayName?.trim() || '';
+  const a = location?.address || {};
+  const street = a.street?.trim();
+  const parts = [
+    street,
+    a.city?.trim(),
+    [a.state?.trim(), a.postalCode?.trim()].filter(Boolean).join(' '),
+  ].filter(Boolean);
+  const lat = location?.coordinates?.latitude;
+  const lon = location?.coordinates?.longitude;
+  const valid =
+    Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lon) && Math.abs(lon) <= 180;
+  return {
+    name,
+    address: street ? parts.join(', ') : null,
+    lat: valid ? lat : null,
+    lon: valid ? lon : null,
+  };
+}
+
+/**
  * Fetch calendar events (UTC) in [fromDate, toDate) that have a physical location.
  * Events whose location looks like a meeting URL are skipped.
  */
@@ -137,12 +164,15 @@ export async function fetchMeetings(fromDate, toDate) {
     if (!res.ok) throw new Error(`Graph error ${res.status}: ${await res.text()}`);
     const body = await res.json();
     for (const ev of body.value) {
-      const loc = ev.location?.displayName?.trim() || '';
-      if (!loc || isVirtual(loc)) continue;
+      const loc = parseEventLocation(ev.location);
+      if (!loc.name || isVirtual(loc.name)) continue;
       meetings.push({
         id: ev.id,
         subject: ev.subject || '(no subject)',
-        location: loc,
+        location: loc.name,
+        address: loc.address,
+        lat: loc.lat,
+        lon: loc.lon,
         start: new Date(ev.start.dateTime + 'Z'),
         end: new Date(ev.end.dateTime + 'Z'),
       });

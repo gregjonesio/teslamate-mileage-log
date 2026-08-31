@@ -7,7 +7,7 @@ It works by joining two data sources you already have:
 - **[TeslaMate](https://github.com/teslamate-org/teslamate)** records every drive your car makes (start/end time, start/end GPS position, distance).
 - **Your Outlook calendar** knows where your business meetings were (event location) and why you went (event subject).
 
-This tool geocodes each meeting's address, finds the drive that ended at that address shortly before the meeting started, optionally pairs it with the return drive, and emits an IRS-style mileage log as CSV: date, business purpose, destination, miles, and deduction at your configured rate.
+This tool locates each meeting (using the coordinates and street address Outlook already attached to the event when you picked the venue from its location search, geocoding the location text otherwise), finds the drive that ended there shortly before the meeting started, optionally pairs it with the return drive, and emits an IRS-style mileage log as CSV: date, business purpose, destination, miles, and deduction at your configured rate.
 
 ## Why TeslaMate?
 
@@ -51,7 +51,27 @@ Output columns: `date, purpose, destination, outbound_miles, return_miles, total
 
 ## Matching rules
 
-A meeting matches a drive when the drive **ended within `MATCH_RADIUS_M` meters** of the meeting's geocoded address, in the window from `ARRIVE_EARLY_MIN` minutes before the meeting start to `ARRIVE_LATE_MIN` minutes after. If `INCLUDE_RETURN=true`, the first later drive **departing** from that location (within 6 hours of the meeting end) is logged as the return leg. Each drive is used at most once. Virtual meetings (Zoom/Teams/Meet/Webex links as the location) are excluded automatically.
+A meeting matches a drive when the drive **ended within `MATCH_RADIUS_M` meters** of the meeting's location, in the window from `ARRIVE_EARLY_MIN` minutes before the meeting start to `ARRIVE_LATE_MIN` minutes after. If `INCLUDE_RETURN=true`, the first **substantive** later drive departing from that location (within 6 hours of the meeting end) is logged as the return leg. Each drive is used at most once. Virtual meetings (Zoom/Teams/Meet/Webex links as the location) are excluded automatically.
+
+A meeting's coordinates come from the first of these that answers: a `venues.json` alias (below), the coordinates or structured street address Outlook attached to the event itself, or Nominatim geocoding of the location text.
+
+Departing drives of `REPOSITION_MAX_MILES` miles or less (default 1) are treated as repositioning hops, not the drive home: moving the car down the block or in and out of a parking structure would otherwise claim the return slot and leave the real drive home unmatched. The hop's end point still counts as where the car is parked, so the return is found even if the shuffle moved the car outside the match radius. Skipped hops show up in the unclaimed-drives list, so a genuine sub-mile return can still be logged with `add --drive`.
+
+## Venues the geocoder cannot find
+
+Outlook meeting locations are often a bare venue name ("Joe's Grill"), especially when the venue was typed rather than picked from Outlook's location search. If the event carries no address or coordinates of its own and Nominatim cannot resolve the name, the meeting cannot match any drive. Pin such venues by hand:
+
+```
+cp venues.example.json venues.json   # then edit; venues.json is gitignored
+```
+
+```json
+[
+  { "name": "Griffith Observatory", "lat": 34.1184, "lon": -118.3004 }
+]
+```
+
+Names match the event location case-insensitively (the venue-name part of a "Name (address)" location also counts), and an alias always wins over the event's own data. Unresolvable locations are listed on stderr with a reminder that one line here fixes the venue forever.
 
 ## Trips that continue by rail or air
 

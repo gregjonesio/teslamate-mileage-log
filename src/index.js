@@ -4,10 +4,11 @@ import { config } from './config.js';
 import { fetchDrives } from './teslamate.js';
 import { fetchMeetings, getToken } from './graph.js';
 import { geocodeLocation } from './geocode.js';
-import { matchTrips } from './matcher.js';
+import { matchTrips, haversineMeters } from './matcher.js';
 import { toCsv, summarize } from './report.js';
 import { importManualTrips, addManualTrip, loggedDriveIds } from './manual.js';
 import { loadHubs } from './hubs.js';
+import { loadVenues, resolveVenue } from './venues.js';
 import { parseDateRange, localDateString, localDateTimeString } from './dates.js';
 
 function parseArgs(argv) {
@@ -51,11 +52,27 @@ async function cmdMatch(args) {
   console.error(`  ${meetings.length} meetings with a physical location`);
 
   console.error('Geocoding meeting locations ...');
+  const venues = loadVenues();
+  if (venues.length) console.error(`  ${venues.length} venue aliases configured`);
   for (const m of meetings) {
-    const coords = await geocodeLocation(m.location);
+    // Precedence: a hand-pinned alias, then coordinates the event itself
+    // carries (Outlook resolves picked venues), then geocoding.
+    const alias = resolveVenue(m.location, venues);
+    const own = m.lat != null && m.lon != null ? { lat: m.lat, lon: m.lon } : null;
+    if (alias && own && haversineMeters(alias.lat, alias.lon, own.lat, own.lon) > 1000) {
+      const km = (haversineMeters(alias.lat, alias.lon, own.lat, own.lon) / 1000).toFixed(1);
+      console.error(
+        `  note: venues.json places "${m.location}" ${km} km from the event's own coordinates; the alias wins`
+      );
+    }
+    const coords = alias ?? own ?? (await geocodeLocation(m.location, m.address));
     m.lat = coords?.lat ?? null;
     m.lon = coords?.lon ?? null;
-    if (!coords) console.error(`  could not geocode: "${m.location}" (${m.subject})`);
+    if (!coords) {
+      console.error(
+        `  could not geocode: "${m.location}" (${m.subject}); add it to venues.json to match it by name`
+      );
+    }
   }
 
   console.error('Fetching drives from TeslaMate ...');
@@ -70,6 +87,7 @@ async function cmdMatch(args) {
     arriveEarlyMin: config.arriveEarlyMin,
     arriveLateMin: config.arriveLateMin,
     includeReturn: config.includeReturn,
+    repositionMaxMiles: config.repositionMaxMiles,
     hubs,
     hubRadiusM: config.hubRadiusM,
     hubDepartEarlyMin: config.hubDepartEarlyMin,
