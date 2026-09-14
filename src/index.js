@@ -88,6 +88,8 @@ async function cmdMatch(args) {
     arriveLateMin: config.arriveLateMin,
     includeReturn: config.includeReturn,
     repositionMaxMiles: config.repositionMaxMiles,
+    errandMaxMiles: config.errandMaxMiles,
+    errandMaxGapMin: config.errandMaxGapMin,
     hubs,
     hubRadiusM: config.hubRadiusM,
     hubDepartEarlyMin: config.hubDepartEarlyMin,

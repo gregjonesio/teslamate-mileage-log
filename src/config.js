@@ -21,6 +21,8 @@ export const config = {
   arriveLateMin: num('ARRIVE_LATE_MIN', 20),
   includeReturn: (process.env.INCLUDE_RETURN ?? 'true') !== 'false',
   repositionMaxMiles: num('REPOSITION_MAX_MILES', 1),
+  errandMaxMiles: num('ERRAND_MAX_MILES', 3),
+  errandMaxGapMin: num('ERRAND_MAX_GAP_MIN', 60),
   hubsFile: process.env.HUBS_FILE || path.join(root, 'hubs.json'),
   venuesFile: process.env.VENUES_FILE || path.join(root, 'venues.json'),
   hubRadiusM: num('HUB_RADIUS_M', 750),
