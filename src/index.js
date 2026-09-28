@@ -9,6 +9,7 @@ import { toCsv, summarize } from './report.js';
 import { importManualTrips, addManualTrip, loggedDriveIds } from './manual.js';
 import { loadHubs } from './hubs.js';
 import { loadVenues, resolveVenue } from './venues.js';
+import { loadPersonalTerms, splitPersonal } from './personal.js';
 import { parseDateRange, localDateString, localDateTimeString } from './dates.js';
 
 function parseArgs(argv) {
@@ -48,8 +49,21 @@ async function cmdMatch(args) {
   const { from, to } = parseDateRange(args.from, args.to);
 
   console.error(`Fetching meetings ${args.from} .. ${args.to} ...`);
-  const meetings = await fetchMeetings(from, to);
-  console.error(`  ${meetings.length} meetings with a physical location`);
+  const fetched = await fetchMeetings(from, to);
+  console.error(`  ${fetched.length} meetings with a physical location`);
+
+  // Personal events leave before geocoding: they must not claim a drive, and
+  // their addresses have no reason to be sent to the geocoder.
+  const { business: meetings, personal } = splitPersonal(fetched, {
+    terms: loadPersonalTerms(),
+    marker: config.personalMarker,
+  });
+  if (personal.length) {
+    console.error(`  ${personal.length} skipped as personal (left out of matching):`);
+    for (const p of personal) {
+      console.error(`    ${localDateString(p.meeting.start)}  ${p.meeting.subject}  [${p.reason}]`);
+    }
+  }
 
   console.error('Geocoding meeting locations ...');
   const venues = loadVenues();

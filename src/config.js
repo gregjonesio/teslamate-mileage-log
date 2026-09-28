@@ -25,6 +25,8 @@ export const config = {
   errandMaxGapMin: num('ERRAND_MAX_GAP_MIN', 60),
   hubsFile: process.env.HUBS_FILE || path.join(root, 'hubs.json'),
   venuesFile: process.env.VENUES_FILE || path.join(root, 'venues.json'),
+  personalFile: process.env.PERSONAL_FILE || path.join(root, 'personal.json'),
+  personalMarker: process.env.PERSONAL_MARKER ?? '(personal)',
   hubRadiusM: num('HUB_RADIUS_M', 750),
   hubDepartEarlyMin: num('HUB_DEPART_EARLY_MIN', 480),
   hubReturnMaxHours: num('HUB_RETURN_MAX_HOURS', 12),

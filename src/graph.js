@@ -153,7 +153,7 @@ export async function fetchMeetings(fromDate, toDate) {
   let url =
     `${base}/calendarView` +
     `?startDateTime=${fromDate.toISOString()}&endDateTime=${toDate.toISOString()}` +
-    `&$select=id,subject,location,start,end&$top=100`;
+    `&$select=id,subject,location,start,end,sensitivity&$top=100`;
   while (url) {
     const res = await fetch(url, {
       headers: {
@@ -169,6 +169,7 @@ export async function fetchMeetings(fromDate, toDate) {
       meetings.push({
         id: ev.id,
         subject: ev.subject || '(no subject)',
+        sensitivity: ev.sensitivity || 'normal',
         location: loc.name,
         address: loc.address,
         lat: loc.lat,

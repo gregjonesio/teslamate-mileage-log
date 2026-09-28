@@ -51,7 +51,7 @@ Output columns: `date, purpose, destination, outbound_miles, return_miles, total
 
 ## Matching rules
 
-A meeting matches a drive when the drive **ended within `MATCH_RADIUS_M` meters** of the meeting's location, in the window from `ARRIVE_EARLY_MIN` minutes before the meeting start to `ARRIVE_LATE_MIN` minutes after it, or until the meeting ends if that is later (a long block such as a site visit accepts an arrival partway through). The earliest such drive is the outbound leg, except that an arrival the car left again before the meeting began (a drop-off on the way) yields to a later arrival that stayed. If `INCLUDE_RETURN=true`, the first **substantive** later drive departing from where the car is parked (after the arrival, within 6 hours of the meeting end) is logged as the return leg. Each drive is used at most once. Virtual meetings (Zoom/Teams/Meet/Webex links as the location) are excluded automatically.
+A meeting matches a drive when the drive **ended within `MATCH_RADIUS_M` meters** of the meeting's location, in the window from `ARRIVE_EARLY_MIN` minutes before the meeting start to `ARRIVE_LATE_MIN` minutes after it, or until the meeting ends if that is later (a long block such as a site visit accepts an arrival partway through). The earliest such drive is the outbound leg, except that an arrival the car left again before the meeting began (a drop-off on the way) yields to a later arrival that stayed. If `INCLUDE_RETURN=true`, the first **substantive** later drive departing from where the car is parked (after the arrival, within 6 hours of the meeting end) is logged as the return leg. Each drive is used at most once. Virtual meetings (Zoom/Teams/Meet/Webex links as the location) are excluded automatically, and so are events identified as personal (below).
 
 A meeting's coordinates come from the first of these that answers: a `venues.json` alias (below), the coordinates or structured street address Outlook attached to the event itself, or Nominatim geocoding of the location text.
 
@@ -74,6 +74,26 @@ cp venues.example.json venues.json   # then edit; venues.json is gitignored
 ```
 
 Names match the event location case-insensitively (the venue-name part of a "Name (address)" location also counts), and an alias always wins over the event's own data. Unresolvable locations are listed on stderr with a reminder that one line here fixes the venue forever.
+
+## Personal events on a business calendar
+
+The matcher cannot tell a client lunch from a school pickup: both are a calendar event with an address, and a drive that ends there is logged with `high` confidence. If personal appointments share your calendar, mark them so they are skipped. An event is personal when any of these holds:
+
+- Outlook marks it so (the event's sensitivity is **Personal**). **Private** is not enough: that setting hides an event from colleagues and says nothing about its purpose.
+- Its subject contains `PERSONAL_MARKER`, which defaults to `(personal)`, as in "Lunch (personal)". Set it empty to turn the marker off.
+- Its subject contains a term from `personal.json`:
+
+```
+cp personal.example.json personal.json   # then edit; personal.json is gitignored
+```
+
+```json
+["Dentist", "School pickup"]
+```
+
+Terms match case-insensitively, and a term must not touch a letter or digit on either side, so a short name never swallows a business subject that merely contains it ("Sam" matches "Pick up Sam" and "Sam's recital", not "Samsung demo"). Spaces and punctuation count as edges. Keep terms specific all the same: a term that also appears in business subjects will drop those trips.
+
+Skipped events are listed on stderr with the rule that caught each one, so check that list after adding a term or upgrading (the `(personal)` marker is on by default). They are left out of matching and never geocoded. A drive to a skipped event normally shows up in the unclaimed-drives list, where a wrongly skipped trip can still be logged with `add --drive`; if a business meeting was held at the same place and time, that meeting can still claim the drive. Without a `personal.json`, only the marker and the Outlook flag apply. A `PERSONAL_FILE` that is set but missing is an error rather than an empty list.
 
 ## Trips that continue by rail or air
 
