@@ -5,11 +5,12 @@ import { fetchDrives } from './teslamate.js';
 import { fetchMeetings, getToken } from './graph.js';
 import { geocodeLocation } from './geocode.js';
 import { matchTrips, haversineMeters } from './matcher.js';
-import { toCsv, summarize } from './report.js';
+import { toCsv, summarize, tripLegs } from './report.js';
 import { importManualTrips, addManualTrip, loggedDriveIds } from './manual.js';
 import { loadHubs } from './hubs.js';
 import { loadVenues, resolveVenue } from './venues.js';
 import { loadPersonalTerms, splitPersonal } from './personal.js';
+import { resolveRates, describeRates } from './rates.js';
 import { parseDateRange, localDateString, localDateTimeString } from './dates.js';
 
 function parseArgs(argv) {
@@ -110,7 +111,11 @@ async function cmdMatch(args) {
     hubReturnMaxHours: config.hubReturnMaxHours,
   });
 
-  const csv = toCsv(entries, { mileageRate: config.mileageRate });
+  // Priced before anything is written: a trip on a date no rate covers stops
+  // the run instead of leaving a log with a borrowed rate in it.
+  const { rates, source: ratesSource } = resolveRates();
+  const csv = toCsv(entries, { rates });
+  const s = summarize(entries, { rates });
   if (args.out) {
     writeFileSync(args.out, csv);
     console.error(`Wrote ${args.out}`);
@@ -118,10 +123,10 @@ async function cmdMatch(args) {
     process.stdout.write(csv);
   }
 
-  const s = summarize(entries, { mileageRate: config.mileageRate });
+  const days = entries.flatMap((e) => tripLegs(e).map((leg) => leg.day));
   console.error(
     `\n${s.trips} matched trips, ${s.totalMiles.toFixed(1)} business miles, ` +
-      `$${s.deduction.toFixed(2)} at $${config.mileageRate}/mi`
+      `$${s.deduction.toFixed(2)}${days.length ? ` at ${describeRates(days, rates)}` : ''} (${ratesSource})`
   );
   const viaHub = entries.filter((e) => e.hub);
   if (viaHub.length) {

@@ -7,7 +7,7 @@ It works by joining two data sources you already have:
 - **[TeslaMate](https://github.com/teslamate-org/teslamate)** records every drive your car makes (start/end time, start/end GPS position, distance).
 - **Your Outlook calendar** knows where your business meetings were (event location) and why you went (event subject).
 
-This tool locates each meeting (using the coordinates and street address Outlook already attached to the event when you picked the venue from its location search, geocoding the location text otherwise), finds the drive that ended there shortly before the meeting started, optionally pairs it with the return drive, and emits an IRS-style mileage log as CSV: date, business purpose, destination, miles, and deduction at your configured rate.
+This tool locates each meeting (using the coordinates and street address Outlook already attached to the event when you picked the venue from its location search, geocoding the location text otherwise), finds the drive that ended there shortly before the meeting started, optionally pairs it with the return drive, and emits an IRS-style mileage log as CSV: date, business purpose, destination, miles, and deduction at the rate in force on that date.
 
 ## Why TeslaMate?
 
@@ -114,13 +114,41 @@ A meeting that no drive explains directly is then matched to the **last drive en
 
 These rows are logged with the hub as the destination and `via-hub` confidence, and are called out separately on stderr. The leg beyond the hub is not GPS-verified, so a direct match always wins over a hub match, and hub matches are for you to confirm rather than to trust. Without a `hubs.json` the feature is simply off.
 
+## Mileage rates
+
+Miles are priced at the rate in force on the day they were driven. The IRS changes the business rate every year and sometimes in the middle of one (2026 is $0.725 per mile through June 30 and $0.76 from July 1), so one number applied to a whole log misprices part of it without any error. The day is the day of the drive, not of the meeting: a drive home after midnight on June 30 is priced at the July rate.
+
+The rates come from the first of these that is set:
+
+- `MILEAGE_RATE`, one flat rate for every date. Use it for an employer's reimbursement rate or a rate outside the US. It overrides both tables. Because a flat rate left over from an earlier year is easy to miss, it must be confirmed with `MILEAGE_RATE_CONFIRMED=true` before it may price a day at anything other than the IRS rate for that day, or a day the built-in IRS rates do not cover.
+- `rates.json`, your own dated table:
+
+```
+cp rates.example.json rates.json   # then edit; rates.json is gitignored
+```
+
+```json
+[
+  { "from": "2026-01-01", "to": "2026-06-30", "rate": 0.725 },
+  { "from": "2026-07-01", "to": "2026-12-31", "rate": 0.76 }
+]
+```
+
+- The IRS business rates built into `src/rates.js`, 2022 onward.
+
+Dates are inclusive, ranges may not overlap, and a rate goes to the tenth of a cent at most. Miles driven on a date no rate covers stop the run before anything is written, rather than borrow the nearest rate: when a new year starts, add its rate (the IRS usually announces it in December) or update to a version of this tool that has it.
+
+A deduction can be checked by hand from the log: the miles the row shows, to the tenth, times the rate, rounded to the cent with half a cent rounding up. The arithmetic is done in whole numbers, so 1.4 miles at $0.725 is $1.02 and not the $1.01 that floating point would give. When the two legs of a trip fall under different rates, each leg is priced at its own and the row is rounded once. The totals printed at the end, miles and deduction alike, are the sum of the rows. A trip logged by hand with `add --date` has only that date to go by: if it spans a change of rate, log each day as its own entry.
+
+**Upgrading:** earlier versions applied `MILEAGE_RATE` (0.70 unless you changed it) to every trip, and `.env.example` set it. If your `.env` still has that line, `match` now stops with an error as soon as it would price a day at a rate other than the IRS rate for that day. Remove the line to follow the IRS rates, or add `MILEAGE_RATE_CONFIRMED=true` if the flat rate is what you intend. Expect your deductions to change either way if your log covers a year other than 2025.
+
 ## Privacy
 
 Everything runs locally. The only external call is address geocoding via OpenStreetMap's Nominatim (one request per unique address, cached forever in `data/geocode-cache.json`). No trip data, calendar data, or tokens ever leave your machine. `data/` and `.env` are gitignored.
 
 ## Disclaimer
 
-This produces a records-based mileage log; it is not tax advice. Check the current IRS standard mileage rate and set `MILEAGE_RATE` accordingly, and review the output before filing.
+This produces a records-based mileage log; it is not tax advice. Check the rates it used against the current [IRS standard mileage rates](https://www.irs.gov/tax-professionals/standard-mileage-rates), and review the output before filing.
 
 ## Roadmap
 
