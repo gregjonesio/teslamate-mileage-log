@@ -19,6 +19,7 @@ export const config = {
   matchRadiusM: num('MATCH_RADIUS_M', 500),
   arriveEarlyMin: num('ARRIVE_EARLY_MIN', 120),
   arriveLateMin: num('ARRIVE_LATE_MIN', 20),
+  arriveAfterEndMin: num('ARRIVE_AFTER_END_MIN', 60),
   includeReturn: (process.env.INCLUDE_RETURN ?? 'true') !== 'false',
   repositionMaxMiles: num('REPOSITION_MAX_MILES', 1),
   errandMaxMiles: num('ERRAND_MAX_MILES', 3),

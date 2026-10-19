@@ -101,6 +101,7 @@ async function cmdMatch(args) {
     radiusM: config.matchRadiusM,
     arriveEarlyMin: config.arriveEarlyMin,
     arriveLateMin: config.arriveLateMin,
+    arriveAfterEndMin: config.arriveAfterEndMin,
     includeReturn: config.includeReturn,
     repositionMaxMiles: config.repositionMaxMiles,
     errandMaxMiles: config.errandMaxMiles,
@@ -138,6 +139,19 @@ ${viaHub.length} trips matched via a transport hub. The rail or air leg is`);
       console.error(
         `  ${localDateString(e.meeting.start)}  drove to ${e.hub.name} (#${legs})` +
           `${e.return ? '' : ', no return drive yet'}  for  ${e.meeting.subject}`
+      );
+    }
+  }
+
+  const late = entries.filter((e) => e.arrivedAfterEndMin);
+  if (late.length) {
+    console.error(`\n${late.length} trips arrived after the calendar block had ended.`);
+    console.error('Confirm each drive was for its meeting before filing:');
+    for (const e of late) {
+      const legs = e.return ? `${e.outbound.id}+${e.return.id}` : String(e.outbound.id);
+      console.error(
+        `  ${localDateString(e.meeting.start)}  arrived ${e.arrivedAfterEndMin} min after the end (#${legs})` +
+          `  for  ${e.meeting.subject}`
       );
     }
   }

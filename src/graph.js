@@ -129,8 +129,12 @@ export function parseEventLocation(location) {
   ].filter(Boolean);
   const lat = location?.coordinates?.latitude;
   const lon = location?.coordinates?.longitude;
+  // Graph sometimes returns 0,0 for a location it did not resolve. Taking that
+  // at face value places the meeting in the Gulf of Guinea, and because event
+  // coordinates outrank geocoding, the location text would never be tried.
   const valid =
-    Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lon) && Math.abs(lon) <= 180;
+    Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lon) && Math.abs(lon) <= 180 &&
+    !(lat === 0 && lon === 0);
   return {
     name,
     address: street ? parts.join(', ') : null,

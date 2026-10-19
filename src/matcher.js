@@ -21,7 +21,7 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
  * meetings: [{ id, subject, location, start, end, lat, lon }] (already geocoded; lat/lon may be null)
  * drives:   [{ id, start, end, miles, startLat, startLon, endLat, endLon, startAddress, endAddress }]
  * hubs:     [{ name, lat, lon, radiusM? }] transport hubs (stations, airports)
- * opts:     { radiusM, arriveEarlyMin, arriveLateMin, includeReturn, repositionMaxMiles,
+ * opts:     { radiusM, arriveEarlyMin, arriveLateMin, arriveAfterEndMin, includeReturn, repositionMaxMiles,
  *             errandMaxMiles, errandMaxGapMin,
  *             hubs, hubRadiusM, hubDepartEarlyMin, hubReturnMaxHours }
  *
@@ -30,16 +30,20 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
  * parked, which after a skipped hop or errand stop may not be the venue itself).
  * A drive is used at most once across all meetings.
  *
- * Two passes. The first matches drives that ended at the meeting itself. The second
- * only sees meetings the first could not explain, and looks for a drive that ended at
- * a transport hub instead: the rail or air leg that follows is invisible to the car,
- * so these are marked `via-hub` for a human to confirm rather than trusted outright.
+ * Three passes. The first matches drives that ended at the meeting itself during
+ * its block. The second gives meetings still unexplained a short grace period after
+ * they end (arriveAfterEndMin, 0 turns it off); such entries carry
+ * `arrivedAfterEndMin` for a human to confirm. The third only sees meetings neither
+ * could explain, and looks for a drive that ended at a transport hub instead: the
+ * rail or air leg that follows is invisible to the car, so these are marked
+ * `via-hub` for a human to confirm rather than trusted outright.
  */
 export function matchTrips(meetings, drives, opts = {}) {
   const {
     radiusM = 500,
     arriveEarlyMin = 120,
     arriveLateMin = 20,
+    arriveAfterEndMin = 60,
     includeReturn = true,
     repositionMaxMiles = 1,
     errandMaxMiles = 3,
@@ -51,6 +55,10 @@ export function matchTrips(meetings, drives, opts = {}) {
   } = opts;
 
   const usedDrives = new Set();
+  // Hops that were part of an arrival some meeting already matched. They stay
+  // free for return legs and the unclaimed list, but never arrive for another meeting.
+  const arrivalHops = new Set();
+  const taken = (id) => usedDrives.has(id) || arrivalHops.has(id);
   const entries = [];
   const errand = { maxMiles: errandMaxMiles, maxGapMs: errandMaxGapMin * 60000 };
 
@@ -59,18 +67,23 @@ export function matchTrips(meetings, drives, opts = {}) {
     .filter((m) => m.lat != null && m.lon != null)
     .sort((a, b) => a.start - b.start);
 
-  for (const meeting of sorted) {
-    const windowStart = new Date(meeting.start.getTime() - arriveEarlyMin * 60000);
-    // Arriving partway through a long block (a site visit, a half-day on site) is
-    // still arriving, so the window stays open until the meeting ends.
+  // Arriving partway through a long block (a site visit, a half-day on site) is
+  // still arriving, so the window stays open until the meeting ends.
+  const blockEnd = (meeting) => {
     const lateEnd = meeting.start.getTime() + arriveLateMin * 60000;
     const meetingEnd = meeting.end instanceof Date ? meeting.end.getTime() : NaN;
-    const windowEnd = new Date(Number.isFinite(meetingEnd) && meetingEnd > lateEnd ? meetingEnd : lateEnd);
+    return Number.isFinite(meetingEnd) && meetingEnd > lateEnd ? meetingEnd : lateEnd;
+  };
 
-    const best = pickOutbound(drives, usedDrives, meeting, windowStart, windowEnd, radiusM, repositionMaxMiles);
-    if (!best) continue;
+  const matchDirect = (meeting, windowEndMs) => {
+    const windowStart = new Date(meeting.start.getTime() - arriveEarlyMin * 60000);
+    const windowEnd = new Date(windowEndMs);
+
+    const best = pickOutbound(drives, taken, meeting, windowStart, windowEnd, radiusM, repositionMaxMiles);
+    if (!best) return;
 
     usedDrives.add(best.drive.id);
+    for (const id of best.hops) arrivalHops.add(id);
     const entry = {
       meeting,
       destination: meeting.location,
@@ -80,6 +93,10 @@ export function matchTrips(meetings, drives, opts = {}) {
       return: null,
       confidence: best.dist <= 300 ? 'high' : 'medium',
     };
+    // Arrived after the block was over: the calendar under-booked the visit,
+    // or the car came for some other reason. Callers should have a human confirm.
+    const after = best.arrival.end.getTime() - blockEnd(meeting);
+    if (after > 0) entry.arrivedAfterEndMin = Math.ceil(after / 60000);
 
     if (includeReturn) {
       // Leaving early is allowed (start > meeting.start, not meeting.end), but
@@ -101,9 +118,24 @@ export function matchTrips(meetings, drives, opts = {}) {
     }
 
     entries.push(entry);
+  };
+
+  for (const meeting of sorted) matchDirect(meeting, blockEnd(meeting));
+
+  // Late pass: a meeting with no arrival inside its block may take one up to
+  // arriveAfterEndMin after it ended (a visit that started later than booked).
+  // It runs only once every meeting has had its own window, so a late arrival
+  // never takes a drive from a later meeting whose window it falls inside.
+  if (arriveAfterEndMin > 0) {
+    for (const meeting of sorted) {
+      if (entries.some((e) => e.meeting === meeting)) continue;
+      const end = meeting.end instanceof Date ? meeting.end.getTime() : NaN;
+      if (!Number.isFinite(end)) continue;
+      matchDirect(meeting, Math.max(blockEnd(meeting), end + arriveAfterEndMin * 60000));
+    }
   }
 
-  // Second pass: meetings reached by rail or air from a transport hub.
+  // Hub pass: meetings reached by rail or air from a transport hub.
   const matched = new Set(entries.map((e) => e.meeting.id));
   for (const meeting of sorted) {
     if (matched.has(meeting.id) || !hubs.length) continue;
@@ -111,7 +143,7 @@ export function matchTrips(meetings, drives, opts = {}) {
     const earliest = new Date(meeting.start.getTime() - hubDepartEarlyMin * 60000);
     let best = null;
     for (const drive of drives) {
-      if (usedDrives.has(drive.id)) continue;
+      if (taken(drive.id)) continue;
       if (drive.end < earliest || drive.end > meeting.start) continue;
       const hub = nearestHub(drive.endLat, drive.endLon, hubs, hubRadiusM);
       if (!hub) continue;
@@ -176,12 +208,13 @@ function isHop(drive, repositionMaxMiles) {
  * arrival, still inside the window, refine the reported distance to the closest
  * the car was parked, so confidence is judged by the visit rather than by a
  * stop just short of it. Hops are not claimed: the return picker can still use
- * them as anchors and they stay visible as unclaimed drives.
+ * them as anchors and they stay visible as unclaimed drives. They are returned as
+ * `hops` so the caller can stop another meeting arriving by them.
  */
-function pickOutbound(drives, usedDrives, meeting, windowStart, windowEnd, radiusM, repositionMaxMiles) {
+function pickOutbound(drives, taken, meeting, windowStart, windowEnd, radiusM, repositionMaxMiles) {
   const target = { lat: meeting.lat, lon: meeting.lon };
   const timeline = [...drives].sort((a, b) => a.start - b.start);
-  const eligible = (d) => !usedDrives.has(d.id) && d.end >= windowStart && d.end <= windowEnd;
+  const eligible = (d) => !taken(d.id) && d.end >= windowStart && d.end <= windowEnd;
   const consecutive = (a, b) =>
     b.start >= a.end && haversineMeters(a.endLat, a.endLon, b.startLat, b.startLon) <= radiusM;
 
@@ -208,9 +241,11 @@ function pickOutbound(drives, usedDrives, meeting, windowStart, windowEnd, radiu
   // Walk back through consecutive hops to the drive that made the trip.
   let drive = first.drive;
   let i = index;
+  const hops = [];
   while (isHop(drive, repositionMaxMiles) && i > 0) {
     const prev = timeline[i - 1];
-    if (usedDrives.has(prev.id) || !consecutive(prev, drive)) break;
+    if (taken(prev.id) || !consecutive(prev, drive)) break;
+    hops.push(drive.id);
     drive = prev;
     i -= 1;
   }
@@ -219,11 +254,12 @@ function pickOutbound(drives, usedDrives, meeting, windowStart, windowEnd, radiu
   let dist = first.dist;
   for (let j = index + 1; j < timeline.length; j++) {
     const next = timeline[j];
-    if (usedDrives.has(next.id) || next.end > windowEnd) break;
+    if (taken(next.id) || next.end > windowEnd) break;
     if (!isHop(next, repositionMaxMiles) || !consecutive(timeline[j - 1], next)) break;
+    hops.push(next.id);
     dist = Math.min(dist, haversineMeters(next.endLat, next.endLon, target.lat, target.lon));
   }
-  return { drive, dist };
+  return { drive, dist, arrival: first.drive, hops };
 }
 
 /**

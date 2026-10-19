@@ -255,12 +255,130 @@ test('arriving partway through a long block still matches', () => {
   assert.equal(entries.length, 1);
   assert.equal(entries[0].outbound.id, 1);
   assert.equal(entries[0].confidence, 'high');
+  assert.equal(entries[0].arrivedAfterEndMin, undefined);
 });
 
-test('a drive ending after the meeting is over is not the outbound leg', () => {
-  const drives = [drive(1, '2026-08-10T19:00:00Z', '2026-08-10T19:45:00Z', OFFICE, NEAR_VENUE, 46.1)];
+test('a drive ending beyond the after-end grace is not the outbound leg', () => {
+  const drives = [drive(1, '2026-08-10T20:00:00Z', '2026-08-10T20:31:00Z', OFFICE, NEAR_VENUE, 46.1)];
   const meetings = [meeting('m1', '2026-08-10T17:00:00Z', '2026-08-10T19:30:00Z')];
   assert.equal(matchTrips(meetings, drives).length, 0);
+});
+
+test('an arrival shortly after an under-booked block matches, flagged for review', () => {
+  // An 80-minute block; the car got there 45 minutes after it ended, moved
+  // half a mile, and drove home later in the day.
+  const PARKED = { lat: 34.0990, lon: -118.3287 }; // ~690 m from VENUE
+  const drives = [
+    drive(1, '2026-08-11T15:10:00Z', '2026-08-11T16:05:00Z', OFFICE, NEAR_VENUE, 28.4),
+    drive(2, '2026-08-11T16:08:00Z', '2026-08-11T16:10:00Z', NEAR_VENUE, PARKED, 0.5),
+    drive(3, '2026-08-11T18:30:00Z', '2026-08-11T19:20:00Z', PARKED, OFFICE, 27.9),
+  ];
+  const meetings = [meeting('m1', '2026-08-11T14:00:00Z', '2026-08-11T15:20:00Z')];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].outbound.id, 1);
+  assert.equal(entries[0].return.id, 3);
+  assert.equal(entries[0].arrivedAfterEndMin, 45);
+});
+
+test('the after-end grace can be switched off', () => {
+  const drives = [drive(1, '2026-08-11T15:10:00Z', '2026-08-11T16:05:00Z', OFFICE, NEAR_VENUE, 28.4)];
+  const meetings = [meeting('m1', '2026-08-11T14:00:00Z', '2026-08-11T15:20:00Z')];
+  assert.equal(matchTrips(meetings, drives, { arriveAfterEndMin: 0 }).length, 0);
+});
+
+test('a late arrival goes to the next meeting there, not the one that already ended', () => {
+  // Two meetings at the same place; the car arrives in the gap between them.
+  const drives = [drive(1, '2026-08-11T17:40:00Z', '2026-08-11T18:20:00Z', OFFICE, NEAR_VENUE, 12.0)];
+  const meetings = [
+    meeting('m1', '2026-08-11T17:00:00Z', '2026-08-11T18:00:00Z'),
+    meeting('m2', '2026-08-11T18:30:00Z', '2026-08-11T19:30:00Z'),
+  ];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].meeting.id, 'm2');
+  assert.equal(entries[0].arrivedAfterEndMin, undefined);
+});
+
+test('an arrival exactly at the end of the grace still matches', () => {
+  const drives = [drive(1, '2026-08-11T15:30:00Z', '2026-08-11T16:20:00Z', OFFICE, NEAR_VENUE, 28.4)];
+  const meetings = [meeting('m1', '2026-08-11T14:00:00Z', '2026-08-11T15:20:00Z')];
+  assert.equal(matchTrips(meetings, drives)[0].arrivedAfterEndMin, 60);
+  assert.equal(matchTrips(meetings, drives, { arriveAfterEndMin: 59 }).length, 0);
+});
+
+test('a hop that brought the car in for one meeting cannot arrive for another', () => {
+  // The car parks out of radius, hops in during the gap between two meetings at
+  // the same place. The later meeting explains the arrival; the earlier one,
+  // already over, must not reuse the hop as a late trip of its own.
+  const SHORT_OF_VENUE = { lat: 34.0990, lon: -118.3287 }; // ~690 m from VENUE
+  const drives = [
+    drive(1, '2026-08-11T17:10:00Z', '2026-08-11T17:55:00Z', OFFICE, SHORT_OF_VENUE, 28.4),
+    drive(2, '2026-08-11T18:20:00Z', '2026-08-11T18:25:00Z', SHORT_OF_VENUE, NEAR_VENUE, 0.5),
+  ];
+  const meetings = [
+    meeting('m1', '2026-08-11T17:00:00Z', '2026-08-11T18:00:00Z'),
+    meeting('m2', '2026-08-11T20:00:00Z', '2026-08-11T21:00:00Z'),
+  ];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].meeting.id, 'm2');
+  assert.equal(entries[0].outbound.id, 1);
+});
+
+test('a hop the car made while parked for one meeting is not the arrival for the next', () => {
+  // Two back-to-back blocks at the same place, inside both windows: the second
+  // meeting has no arrival of its own, only the first one's parking hop.
+  const drives = [
+    drive(1, '2026-08-11T16:20:00Z', '2026-08-11T16:55:00Z', OFFICE, NEAR_VENUE, 12.0),
+    drive(2, '2026-08-11T17:10:00Z', '2026-08-11T17:12:00Z', NEAR_VENUE, NEAR_VENUE, 0.2),
+  ];
+  const meetings = [
+    meeting('m1', '2026-08-11T17:00:00Z', '2026-08-11T18:00:00Z'),
+    meeting('m2', '2026-08-11T18:00:00Z', '2026-08-11T19:00:00Z'),
+  ];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].meeting.id, 'm1');
+});
+
+test('a meeting that matched inside its block is not given a second, late arrival', () => {
+  const drives = [
+    drive(1, '2026-08-11T16:20:00Z', '2026-08-11T16:55:00Z', OFFICE, NEAR_VENUE, 12.0),
+    drive(2, '2026-08-11T18:05:00Z', '2026-08-11T18:40:00Z', NEAR_VENUE, OFFICE, 12.0),
+    drive(3, '2026-08-11T18:45:00Z', '2026-08-11T19:20:00Z', OFFICE, NEAR_VENUE, 12.0),
+  ];
+  const meetings = [meeting('m1', '2026-08-11T17:00:00Z', '2026-08-11T18:00:00Z')];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].outbound.id, 1);
+  assert.equal(entries[0].return.id, 2);
+  assert.equal(entries[0].arrivedAfterEndMin, undefined);
+});
+
+test('a late arrival is measured from the hop that reached the venue, not the drive before it', () => {
+  // Parked out of radius during the block, then hopped in after it ended.
+  const SHORT_OF_VENUE = { lat: 34.0990, lon: -118.3287 }; // ~690 m from VENUE
+  const drives = [
+    drive(1, '2026-08-11T14:30:00Z', '2026-08-11T15:15:00Z', OFFICE, SHORT_OF_VENUE, 28.4),
+    drive(2, '2026-08-11T15:35:00Z', '2026-08-11T15:39:00Z', SHORT_OF_VENUE, NEAR_VENUE, 0.5),
+  ];
+  const meetings = [meeting('m1', '2026-08-11T14:00:00Z', '2026-08-11T15:20:00Z')];
+  const entries = matchTrips(meetings, drives);
+  assert.equal(entries[0].outbound.id, 1);
+  assert.equal(entries[0].arrivedAfterEndMin, 19);
+});
+
+test('a late direct arrival is preferred to a hub match', () => {
+  const drives = [
+    drive(1, '2026-08-11T15:00:00Z', '2026-08-11T15:30:00Z', OFFICE, NEAR_HUB, 14.1),
+    drive(2, '2026-08-11T15:10:00Z', '2026-08-11T16:05:00Z', NEAR_HUB, NEAR_VENUE, 28.4),
+  ];
+  const meetings = [meeting('m1', '2026-08-11T14:00:00Z', '2026-08-11T15:20:00Z')];
+  const entries = matchTrips(meetings, drives, { hubs: HUBS });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].outbound.id, 2);
+  assert.equal(entries[0].hub, null);
 });
 
 test('the late-arrival allowance still applies to a meeting shorter than it', () => {

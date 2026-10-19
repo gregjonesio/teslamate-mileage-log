@@ -61,6 +61,28 @@ test('out-of-range coordinates are rejected so geocoding still runs', () => {
   assert.equal(loc.lon, null);
 });
 
+test('coordinates of exactly 0,0 are a placeholder, so the name is geocoded instead', () => {
+  const loc = parseEventLocation({
+    displayName: '1 Example Way, Springfield',
+    locationType: 'default',
+    address: {},
+    coordinates: { latitude: 0, longitude: 0 },
+  });
+  assert.equal(loc.name, '1 Example Way, Springfield');
+  assert.equal(loc.lat, null);
+  assert.equal(loc.lon, null);
+});
+
+test('a single zero coordinate is still a real place', () => {
+  // On the equator or the prime meridian, not the 0,0 placeholder.
+  const loc = parseEventLocation({
+    displayName: 'Somewhere',
+    coordinates: { latitude: 51.4779, longitude: 0 },
+  });
+  assert.equal(loc.lat, 51.4779);
+  assert.equal(loc.lon, 0);
+});
+
 test('a missing location yields an empty name', () => {
   assert.equal(parseEventLocation(undefined).name, '');
   assert.equal(parseEventLocation({}).name, '');
